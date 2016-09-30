@@ -77,4 +77,13 @@ function utils.segment_distance_single(gt, det)
     end
 end
 
+function utils.split(s, splitor)
+    local t = {}
+    local regexp = "([^'" .. splitor .. "']+)"
+    for w in string.gmatch(s, regexp) do 
+        table.insert(t, w)
+    end
+    return t
+end
+
 return utils
