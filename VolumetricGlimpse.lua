@@ -6,6 +6,7 @@ function VolumetricGlimpse:__init(size, time, depth, scale)
         self.height = size[1]
 	self.width = size[2]
     else
+        self.height, self.width = size, size
     end
     self.time = time or 16
     self.depth = depth or 3
@@ -30,7 +31,7 @@ function VolumetricGlimpse:updateOutput(inputTable)
     assert(torch.type(inputTable) == 'table')
     assert(#inputTable >= 2)
     local input, location = unpack(inputTable)
-    input, location = self:toBatch(input, 3), self:toBatch(location, 1) 
+    --input, location = self:toBatch(input, 3), self:toBatch(location, 1) 
     -- input = [batchsize x channels x time x height x width]
     -- location = [batchsize x 3 (l, x, y)]
     assert(input:dim() == 5 and location:dim() == 2)
@@ -71,7 +72,7 @@ function VolumetricGlimpse:updateOutput(inputTable)
 	        dst:copy(self._pad:narrow(3, y+1, glimpseHeight):narrow(4, x+1, glimpseWidth))
 	    else
 	        self._crop:resize(input:size(2), input:size(3), glimpseHeight, glimpseWidth)
-		self._crop:copy(self._pad:narrow(3, y-1, glimpseHeight):narrow(4, x+1,glimpseWidth))
+		self._crop:copy(self._pad:narrow(3, y+1, glimpseHeight):narrow(4, x+1,glimpseWidth))
 		if torch.type(self.module) == 'nn.VolumetricAveragePooling' then
 		    local poolWidth = glimpseWidth / self.width
 		    assert(poolWidth % 2 == 0)
@@ -89,13 +90,16 @@ function VolumetricGlimpse:updateOutput(inputTable)
 	end
     end
     self.output:resize(input:size(1), self.depth*input:size(2), self.time, self.height, self.width)
-    self.output = self:fromBatch(self.output, 1)
+    --self.output = self:fromBatch(self.output, 1)
+    print("VolumetricGlimpse Completed!")
     return self.output
 end
 
 function VolumetricGlimpse:updateGradInput(inputTable, gradOutput)
-    input, location = self:toBatch(input, 3), self:toBatch(location, 1)  -- ???
-    gradOutput = self:toBatch(gradOutput, 3)  -- ???
+    local input, location = unpack(inputTable)
+    local gradInput, gradLocation = unpack(self.gradInput)
+    --local input, location = self:toBatch(input, 3), self:toBatch(location, 1)  -- ???
+    --local gradOutput = self:toBatch(gradOutput, 3)  -- ???
 
     gradInput:resizeAs(input):zero()
     gradLocation:resizeAs(location):zero()  -- no backprop through location
@@ -104,7 +108,7 @@ function VolumetricGlimpse:updateGradInput(inputTable, gradOutput)
 
     for sampleIdx = 1, gradOutput:size(1) do
         local gradOutputSample = gradOutput[sampleIdx]
-	local gradInputSameple = gradInput[sampleIdx]
+	local gradInputSample = gradInput[sampleIdx]
 	local lyx = location[sampleIdx] -- frame, height, width
 	local y, x = lyx:select(1, 2), lyx:select(1, 3)
 	y, x = (y+1) / 2, (x+1) / 2
@@ -121,8 +125,8 @@ function VolumetricGlimpse:updateGradInput(inputTable, gradOutput)
 
 	    -- add zero padding (glimpse could be partially out of bounds)
 	    local padWidth = math.floor((glimpseWidth-1)/2)
-	    local padWidth = math.floor((glimpseHeight-1)/2)
-	    slef._pad:resize(input:size(2), input:size(3), input:size(4)+padHeight*2, input:size(5)+padWidth*2):zero()
+	    local padHeight = math.floor((glimpseHeight-1)/2)
+	    self._pad:resize(input:size(2), input:size(3), input:size(4)+padHeight*2, input:size(5)+padWidth*2):zero()
 
 	    local h, w = self._pad:size(3) - glimpseHeight, self._pad:size(4) - glimpseWidth
 	    local y, x = math.min(h, math.max(0, y*h)), math.min(w, math.max(0, x*w))
@@ -132,7 +136,7 @@ function VolumetricGlimpse:updateGradInput(inputTable, gradOutput)
 	    if depth == 1 then
 	        pad:copy(src)
 	    else
-	        slef._crop:resize(input:size(2), input:size(3), glimpseHeight, glimpseWidth)
+	        self._crop:resize(input:size(2), input:size(3), glimpseHeight, glimpseWidth)
 		if torch.type(self.module) == 'nn.VolumetricAveragePooling' then
 		    local poolWidth = glimpseWidth / self.width
 		    assert(poolWidth % 2 == 0)
@@ -153,8 +157,8 @@ function VolumetricGlimpse:updateGradInput(inputTable, gradOutput)
 	end
     end
 
-    self.gradInput[1] = self:fromBatch(gradInput, 1)
-    self.gradInput[2] = self:fromBatch(gradLocation, 2)
+    --self.gradInput[1] = self:fromBatch(gradInput, 1)
+    --self.gradInput[2] = self:fromBatch(gradLocation, 2)
 
     return self.gradInput
     
