@@ -30,11 +30,21 @@ end
 function VolumetricGlimpse:updateOutput(inputTable)
     assert(torch.type(inputTable) == 'table')
     assert(#inputTable >= 2)
-    local input, location = unpack(inputTable)
-    --input, location = self:toBatch(input, 3), self:toBatch(location, 1) 
     -- input = [batchsize x channels x time x height x width]
     -- location = [batchsize x 3 (l, x, y)]
-    assert(input:dim() == 5 and location:dim() == 2)
+    local inputVideos, location = unpack(inputTable)
+    print(location)
+
+    -- Get video clips
+    local input = torch.Tensor(inputVideos:size(1), 3, self.time, inputVideos:size(4), inputVideos:size(5))
+    for sampleIdx = 1, inputVideos:size(1) do
+        local video = inputVideos[sampleIdx]
+        local l = location[sampleIdx]:select(1, 1)
+	l = (l+1) / 2  -- 0 ~ 1
+	local stFrame, edFrame = self:getBoundFrame(video, l)
+	input[sampleIdx] = video[{{}, {stFrame, edFrame}, {}, {}}]
+    end
+    
     self.output:resize(input:size(1), self.depth, input:size(2), self.time, self.height, self.width)
     self._crop = self._crop or self.output.new()
     self._pad = self._pad or input.new()
@@ -96,22 +106,25 @@ function VolumetricGlimpse:updateOutput(inputTable)
 end
 
 function VolumetricGlimpse:updateGradInput(inputTable, gradOutput)
-    local input, location = unpack(inputTable)
+    local inputVideos, location = unpack(inputTable)
     local gradInput, gradLocation = unpack(self.gradInput)
     --local input, location = self:toBatch(input, 3), self:toBatch(location, 1)  -- ???
     --local gradOutput = self:toBatch(gradOutput, 3)  -- ???
 
-    gradInput:resizeAs(input):zero()
+    gradInput:resizeAs(inputVideos):zero()
     gradLocation:resizeAs(location):zero()  -- no backprop through location
 
-    gradOutput = gradOutput:view(input:size(1), self.depth, input:size(2), self.time, self.height, self.width)
+    gradOutput = gradOutput:view(inputVideos:size(1), self.depth, inputVideos:size(2), self.time, self.height, self.width)
+
+    -- Get video clips
 
     for sampleIdx = 1, gradOutput:size(1) do
         local gradOutputSample = gradOutput[sampleIdx]
 	local gradInputSample = gradInput[sampleIdx]
 	local lyx = location[sampleIdx] -- frame, height, width
-	local y, x = lyx:select(1, 2), lyx:select(1, 3)
-	y, x = (y+1) / 2, (x+1) / 2
+	local l, y, x = lyx:select(1, 1), lyx:select(1, 2), lyx:select(1, 3)
+	l, y, x = (l+1)/2, (y+1)/2, (x+1)/2
+	local stFrame, edFrame = self:getBoundFrame(inputVideos[sampleIdx], l)
 
 	-- for each depth of glimpse: pad, crop , downscale
 	local glimpseWidth = self.width
@@ -126,7 +139,7 @@ function VolumetricGlimpse:updateGradInput(inputTable, gradOutput)
 	    -- add zero padding (glimpse could be partially out of bounds)
 	    local padWidth = math.floor((glimpseWidth-1)/2)
 	    local padHeight = math.floor((glimpseHeight-1)/2)
-	    self._pad:resize(input:size(2), input:size(3), input:size(4)+padHeight*2, input:size(5)+padWidth*2):zero()
+	    self._pad:resize(inputVideos:size(2), self.time, input:size(4)+padHeight*2, input:size(5)+padWidth*2):zero()
 
 	    local h, w = self._pad:size(3) - glimpseHeight, self._pad:size(4) - glimpseWidth
 	    local y, x = math.min(h, math.max(0, y*h)), math.min(w, math.max(0, x*w))
@@ -136,7 +149,7 @@ function VolumetricGlimpse:updateGradInput(inputTable, gradOutput)
 	    if depth == 1 then
 	        pad:copy(src)
 	    else
-	        self._crop:resize(input:size(2), input:size(3), glimpseHeight, glimpseWidth)
+	        self._crop:resize(inputVideos:size(2), self.time, glimpseHeight, glimpseWidth)
 		if torch.type(self.module) == 'nn.VolumetricAveragePooling' then
 		    local poolWidth = glimpseWidth / self.width
 		    assert(poolWidth % 2 == 0)
@@ -153,39 +166,30 @@ function VolumetricGlimpse:updateGradInput(inputTable, gradOutput)
 	    end
 
 	    -- copy into gradInput tensor (excluding padding)
-	    gradInputSample:add(self._pad:narrow(3, padHeight+1, input:size(4)):narrow(4, padWidth+1, input:size(5)))
+	    gradInputSample[{{}, {stFrame, edFrame}, {}, {}}]:add(self._pad:narrow(3, padHeight+1, input:size(4)):narrow(4, padWidth+1, input:size(5)))
 	end
     end
 
-    --self.gradInput[1] = self:fromBatch(gradInput, 1)
-    --self.gradInput[2] = self:fromBatch(gradLocation, 2)
+    self.gradInput[1] = gradInput
+    self.gradInput[2] = gradLocation
 
     return self.gradInput
     
 end
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+function VolumetricGlimpse:getBoundFrame(video, l)
+    local frameIdx = math.floor(l * video:size(2))
+    local stFrame, edFrame = frameIdx-self.time/2+1, frameIdx+self.time/2
+    if stFrame < 1 then
+        stFrame, edFrame = 1, self.time
+    end 
+    if edFrame > video:size(2) then
+	stFrame, edFrame = video:size(2)-self.time+1, video:size(2)
+    end
+	--input[sampleIdx] = video[{{}, {stFrame, edFrame}, {}, {}}]
+    return stFrame, edFrame
+end
 
 
 

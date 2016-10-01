@@ -13,8 +13,18 @@ function DataHandler:__init(root)
     self.root = self:create_taxonomy_tree()
     self.name2label, self.label2name = self:get_classes()
     self.trainSet, self.valSet, self.testSet = self:create_dataset()
-    print(self.database)
-    --print(self.database)
+end
+
+function DataHandler:getTrainSet()
+    return self.trainSet
+end
+
+function DataHandler:getValSet()
+    return self.valSet
+end
+
+function DataHandler:getTestSet()
+    return self.testSet
 end
 
 function DataHandler:create_video_list()
@@ -64,8 +74,6 @@ function DataHandler:create_dataset()
 	for j = 1, #annotations do
 	    local segment = annotations[j]["segment"]
 	    local st, ed = segment[1] / duration, segment[2] / duration
-	    print(st, ed)
-	    io.read()
 	    gt_segments[j] = torch.Tensor({st, ed})
 	    local labelName = annotations[j]["label"]
 	    gt_labels[j] = self.name2label[labelName]

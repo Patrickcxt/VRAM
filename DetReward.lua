@@ -18,7 +18,7 @@ function DetReward:__init(module, scale, criterion)
    self.criterion = criterion or nn.MSECriterion() -- baseline criterion
    self.sizeAverage = true
    self.gradInput = {torch.Tensor()}
-   self.threshold = threshold or 0.5
+   self.threshold = threshold or 0.3
 end
 
 function DetReward:updateOutput(inputTable, target)
@@ -62,7 +62,6 @@ function DetReward:updateGradInput(inputTable, target)
    
    -- zero gradInput (this criterion has no gradInput for class pred)
    self.gradInput[1]:resizeAs(input):zero()
-   --self.gradInput[1] = self:fromBatch(self.gradInput[1], 1)
    
    -- learn the baseline reward
    self.criterion:forward(baseline, self.reward)

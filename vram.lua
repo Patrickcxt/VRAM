@@ -27,7 +27,7 @@ cmd:option('--cutoffNorm', -1, 'max l2-norm of contatenation of all gradParam te
 cmd:option('--batchSize', 20, 'number of examples per batch')
 cmd:option('--cuda', false, 'use CUDA')
 cmd:option('--useDevice', 1, 'sets the device (GPU) to use')
-cmd:option('--maxEpoch', 2000, 'maximum number of epochs to run')
+cmd:option('--maxEpoch', 100000, 'maximum number of epochs to run')
 cmd:option('--maxTries', 100, 'maximum number of epochs to try to find a better local minima for early-stopping')
 cmd:option('--transfer', 'ReLU', 'activation function')
 cmd:option('--uniform', 0.1, 'initialize parameters using uniform distribution between -uniform and uniform. -1 means default initialization')
@@ -65,10 +65,6 @@ channel = 3
 time = 16
 height = 28
 width = 28
-video = torch.Tensor(20, 3, 16, 28, 28)
-location = torch.Tensor(20, 3)
---input = {video, location}
-input = video
 -----------------------------------------------
 
 
@@ -80,16 +76,6 @@ if not opt.silent then
    table.print(opt)
 end
 
---[[data]]--
-if opt.dataset == 'TranslatedMnist' then
-   ds = torch.checkpoint(
-      paths.concat(dp.DATA_DIR, 'checkpoint/dp.TranslatedMnist.t7'),
-      function() return dp[opt.dataset]() end,
-      opt.overwrite
-   )
-else
-   ds = dp[opt.dataset]()
-end
 
 --[[Model]]--
 if opt.xpPath ~= '' then
@@ -178,27 +164,67 @@ else
    end
 end
 
-print(agent)
-agent:training()
+
+function train()
+    agent:training()
+    loss = nn.ParallelCriterion(true)
+        :add(nn.DetLossCriterion())  -- BACKPROP
+        :add(nn.DetReward(agent, opt.rewardScale)) -- REINFORCE
+
+    for iter = 1, opt.maxEpoch do
+        local start_time  = sys.clock()
+        -- forget ?
+        --local input, label_targets, segment_targets = DataHandler.getNextMinibatch()
+
+        input = torch.Tensor(1, 3, 16, 28, 28)
+        segment_targets = {}
+        for i = 1, 1 do
+            table.insert(segment_targets, torch.Tensor(2, 2))
+        end
+
+	local output = agent:forward(input)
+	local err = loss:forward(output, segment_targets)
+        print("Loss: ", err) 
+	local gradOutput = loss:backward(output, segment_targets)
+	local gradInput = agent:backward(input, gradOutput)
+
+	-- 
+	agent:updateGradParameters(opt.momentum) -- affects gradParams
+	agent:updateParameters(opt.learningRate) -- affect params
+	agent:maxParamNorm(opt.maxOutNorm) -- affects params
+	agent:zeroGradParameters() -- afects gradParams
+
+	if (iter % 2000 == 0) then
+	    opt.learningRate = opt.learningRate + opt.decayFactor
+	    opt.learningRate = math.max(opt.minLR, opt.learningRate)
+	    if not opt.silent then
+	        print("learningRate", opt.learningRate)
+	    end
+
+	    -- save model
+	    local save_name = "traind_agent_" .. tostring(iter) .. ".t7"
+	    torch.save(save_name, agent, 'binary')
+	    print('Model ' .. save_name .. ' saved!')
+	end
+	local duration = sys.clock() - start_time
+	print("Elapsed Time: ", duration)
+    end
+
+--[[
 output = agent:forward(input)
-loss = nn.ParallelCriterion(true)
-    :add(nn.DetLossCriterion())  -- BACKPROP
-    :add(nn.DetReward(agent, opt.rewardScale)) -- REINFORCE
 print(output[1])
 print("======================================")
 print(output[2][1])
 print(output[2][2])
 
-target = {}
-for i = 1, 20 do
-    table.insert(target, torch.Tensor(2, 2))
-end
 err = loss:forward(output, target)
 print("Error: ", err)
 gradOutput = loss:backward(output, target)
 gradInput = agent:backward(input, gradOutput)
+]]
+end
 
-
+train()
 
 --[=[
 --[[Propagators]]--
